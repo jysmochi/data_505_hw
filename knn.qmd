@@ -14,7 +14,7 @@ format:
 
 **Abstract:**
 
-This is a technical blog post of **both** an HTML file *and* [.qmd file](https://raw.githubusercontent.com/cd-public/D505/refs/heads/master/hws/src/knn.qmd) hosted on GitHub pages.
+This is a technical blog post of **both** an HTML file *and* [.qmd file](https://jysmochi.github.io/data_505_hw/knn.qmd) hosted on GitHub pages.
 
 # 1. Setup
 
