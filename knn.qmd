@@ -1,0 +1,119 @@
+---
+title: $K$NN
+author: "Jeffrey Smith"
+date: "02/10/2025"
+
+format: 
+  html:  
+    theme: superhero  
+    mainfont: monospace
+    highlight-style: github
+    title-block-banner: true
+    embed-resources: true
+---
+
+**Abstract:**
+
+This is a technical blog post of **both** an HTML file *and* [.qmd file](https://raw.githubusercontent.com/cd-public/D505/refs/heads/master/hws/src/knn.qmd) hosted on GitHub pages.
+
+# 1. Setup
+
+```{r, echo = TRUE, message = FALSE, warning = FALSE}
+library(tidyverse)
+library(caret)
+library(thematic)
+library(fastDummies)
+library(class)
+thematic_rmd(bg = "#111", fg = "#eee", accent = "#eee")
+wine <- readRDS(gzcon(url("https://github.com/cd-public/D505/raw/master/dat/pinot.rds")))
+```
+
+## 2. $K$NN Concepts
+
+> Before we explain how the choice of K affects the quality of the prediction, we must first explain what K is in $K$NN. Below is listed the basic idea for the $K$NN classifier.
+>
+> -   Given a positive integer $K$ and a test observation $x_0$, first, identify the $K$ points in the dataset that are closest to $x_0$, represented by $N_0$.
+>
+> -   Estimate the conditional probability for class $j$ as the fraction of the points in $N_0$ whose response values equal $j$:
+>
+>     $\hat{p}_j(x_0) = \frac{1}{K}\sum_{i\in N_0}I(y_i = j)$.
+>
+> -   Finally, apply Bayes rule and classify the test observation $x_0$ to the class with the largest estimated probability.
+>
+> So, K is the amount of data we use to classify each point. Using a larger K would mean using more of the data within each step of the algorithm, which should lead to higher quality predictions.
+
+## 3. Feature Engineering
+
+1.  Create a version of the year column that is a *factor* (instead of numeric).
+2.  Create dummy variables that indicate the presence of "cherry", "chocolate" and "earth" in the description.
+
+-   Take care to handle upper and lower case characters.
+
+3.  Create 3 new features that represent the interaction between *time* and the cherry, chocolate and earth inidicators.
+4.  Remove the description column from the data.
+
+```{r}
+mywine = wine %>%
+  mutate(fct_year = factor(year)) %>%
+  mutate(description = tolower(description)) %>%
+  mutate(mycherry = str_detect(description, "cherry"),
+         mychocolate = str_detect(description, "chocolate"),
+         myearth = str_detect(description, "earth")) %>%
+  mutate(cherry_time = year*mycherry,
+         chocolate_time = year*mychocolate,
+         UTC = year*myearth) %>%
+  dplyr::select(-description) 
+# i accidentally called the MASS package 
+# and that also has a select function lol
+```
+
+## 4. Preprocessing
+
+1.  Preprocess the dataframe from the previous code block using BoxCox, centering and scaling of the numeric features
+2.  Create dummy variables for the `year` factor column
+
+```{r}
+mywine = mywine %>%
+  preProcess(method = c("BoxCox", "center", "scale")) %>%
+  predict(mywine) %>%
+  dummy_cols(select_columns = "fct_year",
+             remove_most_frequent_dummy = TRUE,
+             remove_selected_columns = TRUE)
+```
+
+## 5. Running $K$NN
+
+1.  Split the dataframe into an 80/20 training and test set
+2.  Use Caret to run a $K$NN model that uses our engineered features to predict province
+
+-   use 5-fold cross validated subsampling
+-   allow Caret to try 15 different values for $K$
+
+3.  Display the confusion matrix on the test data
+
+```{r}
+set.seed(496) # its a perfect number :D
+i_cant_think_of_a_fun_thing_to_call_this = createDataPartition(mywine$province, p = 0.8, list = FALSE)
+train = mywine[i_cant_think_of_a_fun_thing_to_call_this, ]
+test = mywine[-i_cant_think_of_a_fun_thing_to_call_this, ]
+
+fit = train(province ~ .,
+             data = train, 
+             method = "knn",
+             tuneLength = 15,
+             metric = "Kappa", # this is new
+             trControl = trainControl(method = "cv", number = 5))
+print(confusionMatrix(predict(fit, test),factor(test$province)))
+```
+
+## 6. Kappa
+
+How do we determine whether a Kappa value represents a good, bad or some other outcome?
+
+> There is a rule of thumb for determining how good a Kappa value is. Below 0.2 is not good, between 0.2 and 0.4 is okay, between 0.4 and 0.6 is pretty good, between 0.6 and 0.8 is great, and above 0.8 is suspiciously perfect. The Kappa value from the $K$NN model was 0.3649, so this is an okay Kappa value.
+
+## 7. Improvement
+
+How can we interpret the confusion matrix, and how can we improve in our predictions?
+
+> The confusion matrix tells us how good our model is at making predictions. For example, based on the confusion matrix above, we can for the California reference, the model correctly guessed California 649 times, while incorrectly guessing Burgundy 26 times and Oregon 116 times. Also given is the sensitivity and specificity for each class (simply put the probability the model predicts positive given positive and the probability the model predicts negative given negative respectively). Higher sensitivity and specificity values are better. To improve our predictions, we can play around with different engineered features to try and pinpoint specific variables and interactions that would aid predictive power. We can also play around with different classification techniques, such as QDA.
