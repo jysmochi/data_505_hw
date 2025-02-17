@@ -1,0 +1,179 @@
+---
+title: "Conditional Probability"
+author: "Jeffrey Smith"
+date: "02/17/2025"
+
+format: 
+  html:  # You will quite likely want to change all but the last one, to taste
+    theme: superhero  
+    mainfont: monospace
+    highlight-style: github
+    title-block-banner: true
+    embed-resources: true
+---
+
+**Abstract:**
+
+This is a technical blog post of **both** an HTML file *and* [.qmd file](https://jysmochi.github.io/data_505_hw/naivebayes.qmd) hosted on GitHub pages.
+
+# 1. Setup
+
+**Step Up Code:**
+
+```{r}
+sh <- suppressPackageStartupMessages
+sh(library(tidyverse))
+sh(library(caret))
+sh(library(naivebayes))
+sh(library(tidytext))
+sh(library(scales))
+sh(library(thematic))
+thematic_rmd(bg = "#111", fg = "#eee", accent = "#eee")
+wine <- readRDS(gzcon(url("https://github.com/cd-public/D505/raw/master/dat/pinot.rds")))
+```
+
+# 2. Conditional Probability
+
+Calculate the probability that a Pinot comes from Burgundy given it has the word 'fruit' in the description.
+
+$$
+P({\rm Burgundy}~|~{\rm Fruit})
+$$
+
+```{r}
+wine = wine %>%
+  mutate(description = tolower(description))
+
+# going after P(Burgundy and Fruit)
+n = nrow(wine)
+burgundyfruit = wine %>%
+  filter(province == "Burgundy") %>%
+  mutate(hasfruit = str_detect(description, "fruit"))
+num_burgundyfruit = sum(burgundyfruit$hasfruit)
+prob_burgundyfruit = num_burgundyfruit / n
+# going after P(Fruit)
+fruity = wine %>%
+  mutate(hasfruit = str_detect(description, "fruit"))
+num_fruit = sum(fruity$hasfruit)
+prob_fruit = num_fruit / n
+# so by Bayes Theorem
+prob_burgundy_given_fruit = prob_burgundyfruit / prob_fruit
+print(prob_burgundy_given_fruit)
+```
+
+# 3. Naive Bayes Algorithm
+
+We train a naive bayes algorithm to classify a wine's province using: 1. An 80-20 train-test split. 2. Three features engineered from the description 3. 5-fold cross validation.
+
+We report Kappa after using the model to predict provinces in the holdout sample.
+
+```{r}
+mywine = wine %>%
+  mutate(fct_year = factor(year)) %>%
+  mutate(mycherry = str_detect(description, "cherry")) %>%
+  mutate(mytannins = str_detect(description, "tannins")) %>%
+  mutate(myadhd = str_detect(description, "concentrated")) %>%
+  select(-description, year, id)
+
+set.seed(101) # smallest three digit prime
+this_and_that = createDataPartition(mywine$province, p = 0.80, list = FALSE)
+train = mywine[this_and_that,]
+test = mywine[-this_and_that,]
+
+fit <- train(province ~ .,
+             data = train, 
+             method = "naive_bayes",
+             metric = "Kappa",
+             trControl = trainControl(method = "cv", number = 5))
+print(fit)
+```
+
+# 4. Frequency Differences
+
+We find the three words that most distinguish New York Pinots from all other Pinots.
+
+```{r}
+nywine = wine %>%
+  mutate(province = ifelse(province == "New_York", "NY", "not_NY"))
+
+wtxt <- nywine %>% 
+  unnest_tokens(word, description) %>% 
+  anti_join(stop_words) %>% 
+  filter(str_detect(string = word, pattern = "[a-z+]")) %>%  # get rid weird non alphas
+  filter(str_length(word)>3) %>%  # get rid of strings shorter than 3 characters
+  group_by(word) %>% 
+  mutate(total=n()) %>% 
+  ungroup()
+
+dtxt <- wtxt %>% 
+  filter(province=="NY" | province=="not_NY") %>% 
+  filter(!(word %in% c("wine","pinot","drink","noir","vineyard","palate","notes","flavors","bottling","bottle","finish"))) %>% 
+  filter(total > 400) %>% 
+  group_by(province, word) %>%
+  count() %>% 
+  group_by(province) %>% 
+  mutate(proportion = n / sum(n)) %>% 
+  pivot_wider(id_cols = word, names_from = province, values_from = proportion) %>% 
+  mutate(diff=NY-not_NY) 
+
+smol_pain = wtxt %>% 
+    filter(province=="NY" | province=="not_NY") %>% 
+    filter(!(word %in% c("wine","pinot","drink","noir","vineyard","palate","notes","flavors","bottling"))) %>% 
+    filter(total > 400) %>% 
+    group_by(province, word) %>%
+    count() %>% 
+    group_by(province) %>% 
+    mutate(proportion = n / sum(n)) %>% 
+    pivot_wider(id_cols = word, names_from = province, values_from = proportion) %>% 
+    ggplot(aes(x = NY, y = not_NY, color = abs(NY - not_NY))) +
+    geom_abline(color = "gray40", lty = 2) +
+    geom_jitter(alpha = 0.1, size = 2.5, width = 0.3, height = 0.3) +
+    geom_text(aes(label = word), check_overlap = TRUE, vjust = 1.5) +
+    scale_x_log10(labels = percent_format()) +
+    scale_y_log10(labels = percent_format()) +
+    scale_color_gradient(limits = c(0, 0.001), low = "darkslategray4", high = "gray75") +
+    theme(legend.position="none") +
+    labs(x = "New York", y = "Not New York", title = "Words describing Pinot Noir from New York and Elsewhere")
+
+pain = dtxt %>%
+  top_n(25, diff) %>%
+  mutate(word = reorder(word, diff)) %>%
+  ggplot(aes(word, diff)) +
+  geom_col() +
+  xlab(NULL) +
+  coord_flip()
+
+print(smol_pain)
+print(pain)
+```
+
+> Based on the plots shown above, the three words that most distinguish New York Pinots from all other Pinots are "cherry", "tannins", and "concentrated". I would be amiss to not mention that this word list is generated by proportion with respect to each province, so while "cherry" has the largest difference by proportion between the New York and all other provinces, that does not mean "cherry" appears more by count in New York than it does in other regions, due to differences in region size. 
+
+# 5. Extension
+
+Calculate the variance of the logged word-frequency distributions for each province.
+
+```{r}
+vine = wine %>%
+  unnest_tokens(word, description) %>%
+  anti_join(stop_words) %>%
+  filter(word != "wine") %>%
+  filter(word != "pinot") %>%
+  count(id, word) %>%
+  group_by(id) %>%
+  mutate(freq = n/sum(n)) %>%
+  mutate(exists = (n>0)) %>%
+  ungroup() %>%
+  group_by(word) %>%
+  mutate(total = sum(n)) %>%
+  left_join(select(wine, id, province), by = "id") %>%
+  count(province, word) %>%
+  group_by(province) %>%
+  mutate(logn = log(n)) %>%
+  group_by(province) %>%
+  summarise(variance = var(logn))
+
+print(vine)
+```
+
+
