@@ -1,0 +1,91 @@
+---
+title: "Classification"
+author: "Jeffrey Smith"
+date: "02/24/2025"
+
+format: 
+  html:  
+    theme: superhero  
+    mainfont: monospace
+    highlight-style: github
+    title-block-banner: true
+    embed-resources: true
+---
+
+**Abstract:**
+
+This is a technical blog post of **both** an HTML file *and* [.qmd file](https://jysmochi.github.io/data_505_hw/classification.qmd) hosted on GitHub pages.
+
+# 1. Setup
+
+**Step Up Code:**
+
+```{r}
+sh <- suppressPackageStartupMessages
+sh(library(tidyverse))
+sh(library(caret))
+sh(library(naivebayes))
+sh(library(pROC))
+sh(library(thematic))
+thematic_rmd(bg = "#111", fg = "#eee", accent = "#eee")
+wine <- readRDS(gzcon(url("https://github.com/cd-public/D505/raw/master/dat/pinot.rds")))
+```
+
+# 2. Logistic Concepts
+
+Why do we call it Logistic Regression even though we are using the technique for classification?
+
+> We call it Logistic Regression because of the way that this technique works under the hood. Like simple linear regression, this algorithm also uses a regression line to classify data.
+
+# 3. Modeling
+
+We train a logistic regression algorithm to classify a whether a wine comes from Marlborough using:
+
+1. An 80-20 train-test split.
+2. Three features engineered from the description
+3. 5-fold cross validation.
+
+We report Kappa after using the model to predict provinces in the holdout sample.
+
+```{r}
+set.seed(144) # first three digit number in fibonacci sequence
+mywine = wine %>%
+  mutate(fct_year = factor(year)) %>%
+  mutate(mycherry = str_detect(description, "cherry")) %>%
+  mutate(mychocolate = str_detect(description, "chocolate")) %>%
+  mutate(myearth = str_detect(description, "earth")) %>%
+  mutate(marl = as.factor(province == "Marlborough")) %>%
+  select(-description, -year, -id, -province)
+
+this_and_that = createDataPartition(mywine$marl, p = 0.80, list = FALSE)
+train = mywine[this_and_that,]
+test = mywine[-this_and_that,]
+
+fit <- train(marl ~ .,
+             data = train, 
+             trControl = trainControl(method = "cv", number = 5),
+             method = "glm",
+             family = "binomial")
+print(fit)
+```
+
+
+# 4. Binary vs Other Classification
+
+What is the difference between determining some form of classification through logistic regression versus methods like $K$-NN and Naive Bayes which performed classifications.
+
+> Classification methods such as $K$-NN and Naive Bayes assign data points to their class, whereas logistic regression calculates the probability that a data point belongs to a certain class. A cut-off is assigned for these probabilities where high enough probabilities indicate assignment to said class.
+
+
+# 5. ROC Curves
+
+We can display an ROC for the model to explain your model's quality.
+
+```{r}
+prob <- predict(fit, newdata = test, type = "prob")[,2]
+myRoc <- roc(test$marl, prob)
+print(plot(myRoc))
+print(auc(myRoc))
+```
+
+> The sensitivity of a model is a measure of how well the model detects true positives, and the specificity of a model measures how well the model detects false negatives. To interpret this ROC curve, we can simply look at the area under the curve (AUC). If this AUC value is 1, that indicates a perfect model, and if this AUC value is 0.5, that would show that the model is no better than randomly guessing. Following this logic, higher AUC values are better. Here, the AUC value is 0.8203, which isn't a great.
